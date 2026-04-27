@@ -1,0 +1,38 @@
+sim = require 'sim'
+conveyor = require('models.conveyor_customization-3')
+
+local _init = sysCall_init
+local _actuation = sysCall_actuation
+
+function sysCall_init()
+    if _init then _init() end
+    sensor = sim.getObject('/proximitySensor')
+    conveyorHandle = sim.getObject('/conveyor')
+    cubeDetected = false  -- latch
+end
+
+function sysCall_actuation()
+    local r, dist, point, detectedObj = sim.readProximitySensor(sensor)
+    
+    if r > 0 then
+        cubeDetected = true  -- ativa o latch
+        lastCube = detectedObj
+    end
+    
+    -- S? liberta o latch se o cubo j? n?o existe na cena ou foi movido
+    if cubeDetected and lastCube ~= nil then
+        local parent = sim.getObjectParent(lastCube)
+        if parent ~= -1 and parent ~= conveyorHandle then
+            -- O cubo foi apanhado pelo bra?o
+            cubeDetected = false
+            lastCube = nil
+        end
+    end
+    
+    if cubeDetected then
+        sim.setBufferProperty(conveyorHandle, 'customData.__ctrl__', sim.packTable({vel = 0}))
+    else
+        if _actuation then _actuation() end
+        sim.setBufferProperty(conveyorHandle, 'customData.__ctrl__', sim.packTable({vel = 0.1}))
+    end
+end
