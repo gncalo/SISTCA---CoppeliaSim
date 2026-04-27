@@ -1,0 +1,94 @@
+sim = require 'sim'
+simIK = require 'simIK'
+
+function sysCall_init()
+    ur5        = sim.getObject('/UR5')
+    target     = sim.getObject('/target')
+    tip        = sim.getObject('/UR5/ROBOTIQ85/tip')
+    sensor     = sim.getObject('/proximitySensor')
+    pickTarget = sim.getObject('/pickTarget')
+    placeLeft  = sim.getObject('/placeLeft')
+    placeRight = sim.getObject('/placeRight')
+
+    ikEnv  = simIK.createEnvironment()
+    ikGroup = simIK.createGroup(ikEnv)
+    simIK.addElementFromScene(ikEnv, ikGroup, ur5, tip, target, simIK.constraint_position)
+end
+
+function sysCall_actuation()
+    simIK.handleGroup(ikEnv, ikGroup, {syncWorlds=true, allowError=true})
+end
+
+function moveToPos(pos, speed)
+    local steps = 100
+    local startPos = sim.getObjectPosition(target, sim.handle_world)
+    for i = 1, steps do
+        local t = i / steps
+        sim.setObjectPosition(target, sim.handle_world, {
+            startPos[1] + (pos[1] - startPos[1]) * t,
+            startPos[2] + (pos[2] - startPos[2]) * t,
+            startPos[3] + (pos[3] - startPos[3]) * t
+        })
+        sim.wait(speed / steps)
+    end
+end
+
+function getCubeColor(handle)
+    local ok, result = pcall(sim.getObjectColor, handle, 0, sim.colorcomponent_ambient_diffuse)
+    if ok then
+        print("R=" .. tostring(result[1]) .. " G=" .. tostring(result[2]) .. " B=" .. tostring(result[3]))
+        -- Vermelho: R=1, G=0, B=0
+        if result[1] > 0.9 and result[2] < 0.1 and result[3] < 0.1 then
+            return 'red'
+        end
+        -- Amarelo: R=1, G=1, B=0
+        if result[1] > 0.9 and result[2] > 0.9 and result[3] < 0.1 then
+            return 'yellow'
+        end
+    end
+    return 'unknown'
+end
+function sysCall_thread()
+    while true do
+        -- Espera sensor detetar cubo
+        local result, dist, point, cuboid
+        repeat
+            result, dist, point, cuboid = sim.readProximitySensor(sensor)
+            sim.switchThread()
+        until result > 0 and cuboid ~= nil
+
+        sim.wait(0.5)
+
+        -- L? cor e escolhe destino
+        local cor = getCubeColor(cuboid)
+        local placePos
+        if cor == 'red' then
+            placePos = sim.getObjectPosition(placeLeft, sim.handle_world)
+            print('Vermelho -> Mesa Esquerda')
+        else
+            placePos = sim.getObjectPosition(placeRight, sim.handle_world)
+            print('Amarelo -> Mesa Direita')
+        end
+
+        -- Vai buscar o cubo
+        local pickPos = sim.getObjectPosition(pickTarget, sim.handle_world)
+        moveToPos({pickPos[1], pickPos[2], pickPos[3] + 0.15}, 1.0)
+        moveToPos(pickPos, 0.5)
+
+        -- Agarra
+        sim.setObjectParent(cuboid, tip, true)
+
+        -- Leva para a mesa
+        moveToPos({pickPos[1], pickPos[2], pickPos[3] + 0.3}, 0.5)
+        moveToPos({placePos[1], placePos[2], placePos[3] + 0.3}, 1.5)
+        moveToPos(placePos, 0.5)
+
+        -- Larga
+        sim.setObjectParent(cuboid, -1, true)
+
+        -- Volta para cima
+        moveToPos({placePos[1], placePos[2], placePos[3] + 0.3}, 0.5)
+
+        sim.wait(0.5)
+    end
+end
